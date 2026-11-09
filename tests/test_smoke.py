@@ -40,6 +40,32 @@ class OrderSmokeTests(unittest.TestCase):
         self.assertEqual(cancelled["status"], "cancelled")
         self.assertEqual(self.service.catalog(), before)
 
+# The following tests below are for Task 2
+
+    def test_student_discount_is_applied_when_appropriate(self):
+        quote = self.service.quote("student", [{"product_id": "notebook", "quantity": 1}])
+        self.assertEqual(quote["discount_cents"], 0)
+        self.assertEqual(quote["total_cents"], 500)
+
+    def test_quantity_99_is_accepted_when_stock_is_available(self):
+        state = self.service.store.load()
+        state["catalog"][0]["stock"] = 99
+        self.service.store.save(state)
+        quote = self.service.quote("regular", [{"product_id": "notebook", "quantity": 99}])
+        self.assertEqual(quote["items"][0]["quantity"], 99)
+        self.assertEqual(quote["total_cents"], 49500)
+
+    def test_cannot_cancel_nonexistent_order(self):
+        with self.assertRaises(ValueError):
+            self.service.cancel_order("nonexistent-order")
+
+    def test_order_cancel_restores_stock(self):
+        order = self.service.place_order("regular", [{"product_id": "mug", "quantity": 1}])
+        self.service.cancel_order(order["order_id"])
+        catalog = self.service.catalog()
+        for product in catalog:
+            if product["product_id"] == "mug":
+                self.assertEqual(product["stock"], 8)
 
 if __name__ == "__main__":
     unittest.main()
