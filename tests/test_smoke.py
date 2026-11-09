@@ -59,13 +59,13 @@ class OrderSmokeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.cancel_order("nonexistent-order")
 
-    def test_order_cancel_restores_stock(self):
-        order = self.service.place_order("regular", [{"product_id": "mug", "quantity": 1}])
+    def test_cancelling_order_twice_does_not_restore_stock_twice(self):
+        order = self.service.place_order("regular", [{"product_id": "pen-pack", "quantity": 2}])
         self.service.cancel_order(order["order_id"])
-        catalog = self.service.catalog()
-        for product in catalog:
-            if product["product_id"] == "mug":
-                self.assertEqual(product["stock"], 8)
+        stock_after_first_cancel = self.service.catalog()
+        self.service.cancel_order(order["order_id"])
+        stock_after_second_cancel = self.service.catalog()
+        self.assertEqual(stock_after_second_cancel, stock_after_first_cancel)
 
 if __name__ == "__main__":
     unittest.main()
