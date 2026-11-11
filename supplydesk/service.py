@@ -57,6 +57,12 @@ class OrderService:
                 return product
         return None
 
+    def _find_order(self, state, order_id):
+        for order in state["orders"]:
+            if order["order_id"] == order_id:
+                return order
+        raise ValueError("Unknown order: " + order_id)
+
     def _build_quote(self, state, customer_type, items, fulfillment):
         if customer_type not in ("regular", "student"):
             raise ValueError("Customer type must be regular or student.")
@@ -138,24 +144,17 @@ class OrderService:
 
     def get_order(self, order_id):
         state = self.store.load()
-        for order in state["orders"]:
-            if order["order_id"] == order_id:
-                return order
-        raise ValueError("Unknown order: " + order_id)
+        return self._find_order(state, order_id)
 
     def cancel_order(self, order_id):
         state = self.store.load()
-        order = None
-        for candidate in state["orders"]:
-            if candidate["order_id"] == order_id:
-                order = candidate
-                break
-        if order is None:
-            raise ValueError("Unknown order: " + order_id)
+        order = self._find_order(state, order_id)
+
         for line in order["items"]:
             for product in state["catalog"]:
                 if product["product_id"] == line["product_id"]:
                     product["stock"] += line["quantity"]
+
         order["status"] = "cancelled"
         self.store.save(state)
         return order
