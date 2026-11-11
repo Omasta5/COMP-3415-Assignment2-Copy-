@@ -2,6 +2,19 @@
 
 from supplydesk.storage import JsonStore
 
+# Order configuration constants
+MINIMUM_ORDER_QUANTITY = 1
+MAXIMUM_ORDER_QUANTITY = 99
+
+STUDENT_DISCOUNT_THRESHOLD_CENTS = 5000
+STUDENT_DISCOUNT_PERCENT = 10
+PERCENTAGE_BASE = 100
+ROUNDING_ADJUSTMENT = 50
+
+FREE_DELIVERY_THRESHOLD_CENTS = 10000
+DELIVERY_FEE_CENTS = 600
+
+ORDER_ID_PADDING_LENGTH = 4
 
 class OrderService:
     def __init__(self, state_path=".supplydesk/state.json"):
@@ -12,31 +25,78 @@ class OrderService:
 
     def quote(self, customer_type, items, fulfillment="pickup"):
         state = self.store.load()
+        return self._build_quote(
+            state, customer_type, items, fulfillment
+    )
+
+    def place_order(self, customer_type, items, fulfillment="pickup"):
+        state = self.store.load()
+        quote = self._build_quote(
+            state, customer_type, items, fulfillment
+        )
+
+        order = {
+            "order_id": "ORD-" + str(state["next_order_number"]).zfill(ORDER_ID_PADDING_LENGTH),
+            "status": "placed",
+            **quote,
+        }
+
+        for line in quote["items"]:
+            product = self._find_product(state, line["product_id"])
+            if product is not None:
+                product["stock"] -= line["quantity"]
+
+        state["next_order_number"] += 1
+        state["orders"].append(order)
+        self.store.save(state)
+        return order
+
+    def _find_product(self, state, product_id):
+        for product in state["catalog"]:
+            if product["product_id"] == product_id:
+                return product
+        return None
+
+    def _build_quote(self, state, customer_type, items, fulfillment):
         if customer_type not in ("regular", "student"):
             raise ValueError("Customer type must be regular or student.")
+
         if fulfillment not in ("pickup", "delivery"):
             raise ValueError("Fulfillment must be pickup or delivery.")
+
         if not isinstance(items, list) or not items:
             raise ValueError("An order must contain at least one item.")
+
         lines = []
         subtotal = 0
+
         for item in items:
             if not isinstance(item, dict):
                 raise ValueError("Each item must contain a product_id and quantity.")
-            product = None
-            for candidate in state["catalog"]:
-                if candidate["product_id"] == item.get("product_id"):
-                    product = candidate
-                    break
+
+            product = self._find_product(state, item.get("product_id"))
+
             if product is None:
                 raise ValueError("Unknown product.")
+
             quantity = item.get("quantity")
-            if type(quantity) is not int or quantity < 1 or quantity > 99:
-                raise ValueError("Quantity must be an integer from 1 to 99.")
+
+            if (
+                type(quantity) is not int
+                or quantity < MINIMUM_ORDER_QUANTITY
+                or quantity > MAXIMUM_ORDER_QUANTITY
+            ):
+                raise ValueError(
+                    f"Quantity must be an integer from "
+                    f"{MINIMUM_ORDER_QUANTITY} to {MAXIMUM_ORDER_QUANTITY}."
+                )
+
             if quantity > product["stock"]:
                 raise ValueError("Not enough stock for " + product["product_id"] + ".")
+
             line_total = product["unit_price_cents"] * quantity
             subtotal += line_total
+
             lines.append({
                 "product_id": product["product_id"],
                 "name": product["name"],
@@ -44,12 +104,25 @@ class OrderService:
                 "quantity": quantity,
                 "line_total_cents": line_total,
             })
+
         discount = 0
-        if customer_type == "student" and subtotal > 5000:
-            discount = (subtotal * 10 + 50) // 100
+
+        if (
+            customer_type == "student"
+            and subtotal > STUDENT_DISCOUNT_THRESHOLD_CENTS
+        ):
+            discount = (
+                subtotal * STUDENT_DISCOUNT_PERCENT + ROUNDING_ADJUSTMENT
+            ) // PERCENTAGE_BASE
+
         delivery = 0
-        if fulfillment == "delivery" and subtotal - discount < 10000:
-            delivery = 600
+
+        if (
+            fulfillment == "delivery"
+            and subtotal - discount < FREE_DELIVERY_THRESHOLD_CENTS
+        ):
+            delivery = DELIVERY_FEE_CENTS
+
         return {
             "customer_type": customer_type,
             "fulfillment": fulfillment,
@@ -59,66 +132,6 @@ class OrderService:
             "delivery_cents": delivery,
             "total_cents": subtotal - discount + delivery,
         }
-
-    def place_order(self, customer_type, items, fulfillment="pickup"):
-        state = self.store.load()
-        if customer_type not in ("regular", "student"):
-            raise ValueError("Customer type must be regular or student.")
-        if fulfillment not in ("pickup", "delivery"):
-            raise ValueError("Fulfillment must be pickup or delivery.")
-        if not isinstance(items, list) or not items:
-            raise ValueError("An order must contain at least one item.")
-        lines = []
-        subtotal = 0
-        for item in items:
-            if not isinstance(item, dict):
-                raise ValueError("Each item must contain a product_id and quantity.")
-            product = None
-            for candidate in state["catalog"]:
-                if candidate["product_id"] == item.get("product_id"):
-                    product = candidate
-                    break
-            if product is None:
-                raise ValueError("Unknown product.")
-            quantity = item.get("quantity")
-            if type(quantity) is not int or quantity < 1 or quantity > 99:
-                raise ValueError("Quantity must be an integer from 1 to 99.")
-            if quantity > product["stock"]:
-                raise ValueError("Not enough stock for " + product["product_id"] + ".")
-            line_total = product["unit_price_cents"] * quantity
-            subtotal += line_total
-            lines.append({
-                "product_id": product["product_id"],
-                "name": product["name"],
-                "unit_price_cents": product["unit_price_cents"],
-                "quantity": quantity,
-                "line_total_cents": line_total,
-            })
-        discount = 0
-        if customer_type == "student" and subtotal > 5000:
-            discount = (subtotal * 10 + 50) // 100
-        delivery = 0
-        if fulfillment == "delivery" and subtotal - discount < 10000:
-            delivery = 600
-        order = {
-            "order_id": "ORD-" + str(state["next_order_number"]).zfill(4),
-            "status": "placed",
-            "customer_type": customer_type,
-            "fulfillment": fulfillment,
-            "items": lines,
-            "subtotal_cents": subtotal,
-            "discount_cents": discount,
-            "delivery_cents": delivery,
-            "total_cents": subtotal - discount + delivery,
-        }
-        for line in lines:
-            for product in state["catalog"]:
-                if product["product_id"] == line["product_id"]:
-                    product["stock"] -= line["quantity"]
-        state["next_order_number"] += 1
-        state["orders"].append(order)
-        self.store.save(state)
-        return order
 
     def list_orders(self):
         return self.store.load()["orders"]
