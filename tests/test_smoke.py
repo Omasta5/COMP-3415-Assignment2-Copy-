@@ -67,5 +67,64 @@ class OrderSmokeTests(unittest.TestCase):
         stock_after_second_cancel = self.service.catalog()
         self.assertEqual(stock_after_second_cancel, stock_after_first_cancel)
 
+    # The following are the tests created for testing CR-01 implementaions for task 5
+    
+    def test_express_delivery_fee_is_applied_to_orders(self):
+        items = [{"product_id": "hoodie", "quantity": 3}]
+
+        order = self.service.place_order("regular", items, "express")
+
+        self.assertEqual(order["fulfillment"], "express")
+        self.assertEqual(order["subtotal_cents"], 12000)
+        self.assertEqual(order["delivery_cents"], 1200)
+        self.assertEqual(order["total_cents"], 13200)
+
+
+    def test_express_delivery_fee_is_included_in_quotes(self):
+        items = [{"product_id": "notebook", "quantity": 2}]
+
+        quote = self.service.quote("regular", items, "express")
+
+        self.assertEqual(quote["fulfillment"], "express")
+        self.assertEqual(quote["subtotal_cents"], 1000)
+        self.assertEqual(quote["delivery_cents"], 1200)
+        self.assertEqual(quote["total_cents"], 2200)
+
+
+    def test_student_discount_and_express_delivery_are_calculated_together(self):
+        items = [{"product_id": "hoodie", "quantity": 2}]
+
+        quote = self.service.quote("student", items, "express")
+
+        self.assertEqual(quote["subtotal_cents"], 8000)
+        self.assertEqual(quote["discount_cents"], 800)
+        self.assertEqual(quote["delivery_cents"], 1200)
+        self.assertEqual(quote["total_cents"], 8400)
+
+
+    def test_standard_delivery_and_pickup_calculations_remain_unchanged(self):
+        items = [{"product_id": "notebook", "quantity": 2}]
+
+        standard_quote = self.service.quote("regular", items, "delivery")
+        pickup_quote = self.service.quote("regular", items, "pickup")
+
+        # Standard delivery retains its existing $6.00 fee.
+        self.assertEqual(standard_quote["delivery_cents"], 600)
+        self.assertEqual(standard_quote["total_cents"], 1600)
+
+        # Pickup continues to have no delivery fee.
+        self.assertEqual(pickup_quote["delivery_cents"], 0)
+        self.assertEqual(pickup_quote["total_cents"], 1000)
+
+        # Standard delivery is still free above the $100 threshold.
+        larger_items = [{"product_id": "hoodie", "quantity": 3}]
+        free_delivery_quote = self.service.quote(
+            "regular", larger_items, "delivery"
+        )
+
+        self.assertEqual(free_delivery_quote["delivery_cents"], 0)
+        self.assertEqual(free_delivery_quote["total_cents"], 12000)
+    
+
 if __name__ == "__main__":
     unittest.main()
